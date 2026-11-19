@@ -1,0 +1,17 @@
+[project]
+name = "identity-free-volatility"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Tianzhi", email = "houtianzhi2005@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+identity-free-volatility = "identity_free_volatility:main"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"
