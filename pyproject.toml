@@ -1,13 +1,35 @@
 [project]
 name = "identity-free-volatility"
 version = "0.1.0"
-description = "Add your description here"
+description = "Isolating call-specific volatility signal in earnings call transcripts"
 readme = "README.md"
 authors = [
     { name = "Tianzhi", email = "houtianzhi2005@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "anthropic",
+    "gdown",
+    "huggingface-hub",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "scikit-learn",
+    "scipy",
+    "sentencepiece",
+    "tabulate",
+    "torch",
+    "tqdm",
+    "transformers",
+    "yfinance",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel",
+    "pytest",
+]
 
 [project.scripts]
 identity-free-volatility = "identity_free_volatility:main"
