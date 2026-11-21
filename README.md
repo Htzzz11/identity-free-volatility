@@ -34,7 +34,12 @@ uv run python scripts/validate_labels.py  # agreement with DEC, timing-recovery 
 uv run pytest
 ```
 
-Everything under `data/` and `results/` stays local. Transcript text must never
+Team members can skip the price download and the paid LLM summaries by copying
+`data/` and `results/` from the private companion repository
+`SonghanWu/identity-free-volatility-data` (labels, price cache, summaries,
+baseline predictions; ask Songhan for access).
+
+Everything under `data/` and `results/` stays out of this repository. Transcript text must never
 be committed or re-hosted (STRUX is CC BY-NC-ND, DEC text is third-party).
 
 ## Labels
