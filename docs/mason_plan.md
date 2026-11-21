@@ -19,7 +19,7 @@
 - [x] 9. TF-IDF + ridge
 - [x] 10. 统一的预测文件格式和指标
 - [x] 11. 推代码、开 PR
-- [ ] 12. LLM-summary baseline（脚本已写好，等确认模型、费用和 API key，目前没有花钱）
+- [x] 12. LLM-summary baseline（Sonnet 5.5 为正式版，Haiku 5.5 作参考）
 
 ## 逐步核对
 
@@ -102,9 +102,14 @@
 - https://github.com/Htzzz11/identity-free-volatility/pull/1
 - 核对：8 个单元测试通过；PR 里只有代码；PR 描述里的数字已按修正后的结果更新。
 
-### 12. LLM-summary baseline（未完成）
-- 已有：`scripts/llm_summaries.py`（走 Batch API；不加 `--yes-spend` 不会发任何计费请求）和 `baselines/summary.py`（本机开源 embedding + 同一个 MLP）。
-- 还缺：选定模型和确认费用，以及本机的 `ANTHROPIC_API_KEY`。
+### 12. LLM-summary baseline
+- 做了什么：用 Claude 通过 Batch API 把 DEC 的 1,800 场转录各总结成约 400 词（财务表现、管理层措辞、经营动态三段），再用本机的开源 embedding 模型（BAAI/bge-m3）转成向量，接同一个 MLP，3 个 seed。脚本是 `scripts/llm_summaries.py` 和 `baselines/summary.py`。
+- 花费：Sonnet 5.5 实际 $42.00（事前估 $36），Haiku 5.5 实际 $2.03，合计 $44.03。
+- 核对：
+  - 两个模型都是 1,800 场全部正常结束（stop_reason 全是 end_turn），没有拒答或截断。
+  - 摘要长度中位数：Sonnet 462 词，Haiku 401 词。抽看过内容，三段齐全，数字和原文对得上。
+  - 输入 token 实际 3,229 万，和事前用 count_tokens 抽样估的 3,230 万一致。
+- 和论文的差别：论文用 OpenAI 的 embedding 模型，我们用的是本机开源模型，所以这一行和论文的 Summarization 行不能逐位比较。
 
 ## 最终结果（四个 horizon 的平均 MSE）
 
@@ -114,6 +119,8 @@
 | STPEV | 0.252 | 0.252 | 0.283 |
 | Random(Ticker) + MLP | 0.267 ± 0.001 | 0.265 | 0.296 ± 0.003 |
 | OpenAI embedding + MLP | 0.280 ± 0.002 | 0.263 | 无 embedding |
+| Sonnet 5.5 摘要 + MLP | 0.281 ± 0.003 | 0.249–0.262（GPT-4o / Gemini 摘要） | 未做 |
+| Haiku 5.5 摘要 + MLP | 0.287 ± 0.002 | 同上 | 未做 |
 | PEV | 0.310 | 0.307 | 0.416 |
 | Random(All) + MLP | 0.331 ± 0.003 | 0.323 | 0.438 ± 0.003 |
 
