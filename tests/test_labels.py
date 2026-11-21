@@ -55,3 +55,16 @@ def test_pipeline_reproduces_dec_labels():
         diffs.append(abs(ours["lv3"] - r.lv3_future_3))
     assert np.nanmedian(diffs) < 0.01
     assert np.nanmean(np.array(diffs) < 0.05) > 0.95
+
+
+@dec_available
+def test_dec_flag_is_read_from_the_label_window():
+    """EOG reports after the close and holds the call next morning. DEC lists the
+    call date (2022-08-05) with AfterMarket, but its returns start on 08-05, so
+    relative to the call date the flag must be BeforeMarket."""
+    from identity_free_volatility import prices, strux
+    close = prices.cache_closes(["EOG", "AAPL"])
+    calls = pd.DataFrame({"call_id": ["EOG_20220805", "AAPL_20200430"], "ticker": ["EOG", "AAPL"],
+                          "date": pd.to_datetime(["2022-08-05", "2020-04-30"]), "header": ["", ""]})
+    out = strux.recover_release(calls, None, close)
+    assert out["dec"].tolist() == [labels.BMO, labels.AMC]

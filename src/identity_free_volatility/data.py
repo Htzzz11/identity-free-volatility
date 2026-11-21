@@ -78,12 +78,13 @@ def rolling_splits(frame: pd.DataFrame, first_test: str = "2019Q1",
 
 
 def load_strux(first_test: str = "2019Q1", seed: int = 0) -> Corpus:
-    """Dense STRUX subset: tickers with >= 20 calls, calls with all four labels."""
+    """Dense STRUX subset: tickers with >= 20 calls, calls with all four labels,
+    minus the few transcripts that repeat another call under a second date."""
     calls = pd.read_parquet(PROCESSED / "calls.parquet",
-                            columns=["call_id", "ticker", "date", "year", "quarter",
-                                     "dense", "timing", "timing_source", *LABELS])
-    frame = calls[calls["dense"] & calls[LABELS].notna().all(axis=1)]
-    frame = frame.drop(columns="dense").sort_values(["ticker", "date"]).reset_index(drop=True)
+                            columns=["call_id", "ticker", "date", "year", "quarter", "dense",
+                                     "dup_suspect", "timing", "timing_source", *LABELS])
+    frame = calls[calls["dense"] & ~calls["dup_suspect"] & calls[LABELS].notna().all(axis=1)]
+    frame = frame.drop(columns=["dense", "dup_suspect"]).sort_values(["ticker", "date"]).reset_index(drop=True)
     return Corpus("strux", frame, rolling_splits(frame, first_test, seed=seed))
 
 
