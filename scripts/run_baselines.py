@@ -4,7 +4,8 @@
   .venv/bin/python scripts/run_baselines.py --corpus strux --models pev stpev tfidf_ridge
 
 Models: pev, stpev, random_ticker, random_all, tfidf_ridge, openai_mlp (DEC only,
-uses the frozen embeddings released with DEC).
+uses the frozen embeddings released with DEC), and summary_mlp (DEC only, not run
+by default: needs summaries from scripts/llm_summaries.py and --summary-model).
 """
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import argparse
 import time
 
 from identity_free_volatility import data, evaluate
-from identity_free_volatility.baselines import historical, mlp, tfidf
+from identity_free_volatility.baselines import historical, mlp, summary, tfidf
 from identity_free_volatility.paths import RESULTS
 
 ALL = ["pev", "stpev", "random_ticker", "random_all", "tfidf_ridge", "openai_mlp"]
@@ -21,7 +22,8 @@ ALL = ["pev", "stpev", "random_ticker", "random_all", "tfidf_ridge", "openai_mlp
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", choices=["dec", "strux"], required=True)
-    ap.add_argument("--models", nargs="+", default=ALL, choices=ALL)
+    ap.add_argument("--models", nargs="+", default=ALL, choices=[*ALL, "summary_mlp"])
+    ap.add_argument("--summary-model", help="Claude model id whose summaries to use")
     ap.add_argument("--seeds", nargs="+", type=int, default=[2021, 2022, 2023])
     ap.add_argument("--summary-only", action="store_true")
     args = ap.parse_args()
@@ -32,8 +34,8 @@ def main() -> None:
 
     for model in [] if args.summary_only else args.models:
         t0 = time.time()
-        if model == "openai_mlp" and corpus.name != "dec":
-            print("openai_mlp: skipped, embeddings exist for DEC only")
+        if model in ("openai_mlp", "summary_mlp") and corpus.name != "dec":
+            print(f"{model}: skipped, DEC only")
             continue
         print(f"== {model}")
         if model == "pev":
@@ -47,13 +49,17 @@ def main() -> None:
         else:
             for seed in args.seeds:
                 print(f" seed {seed}")
+                name = model
                 if model == "openai_mlp":
                     emb = data.load_dec_embeddings(corpus)
+                elif model == "summary_mlp":
+                    emb = summary.summary_embeddings(corpus, args.summary_model)
+                    name = f"summary_{args.summary_model.removeprefix('claude-')}_mlp"
                 elif model == "random_ticker":
                     emb = mlp.random_ticker(corpus, seed)
                 else:
                     emb = mlp.random_all(corpus, seed)
-                evaluate.save_preds(corpus, model, seed, mlp.run(corpus, emb, seed))
+                evaluate.save_preds(corpus, name, seed, mlp.run(corpus, emb, seed))
         print(f"  done in {time.time() - t0:.0f}s")
 
     blocks = [("all test quarters", None)]
