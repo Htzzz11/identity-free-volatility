@@ -45,10 +45,12 @@ session that prices in the release (release day if before the open, next session
 if after the close). This is the DEC / Qin and Yang definition: it reproduces
 DEC's label columns exactly and the Target Q3 2017 check (tau = 3: -2.726).
 
-STRUX has only the call date, so the before/after-market flag is recovered from
-DEC (where it overlaps), then Yahoo's earnings timestamp, then the greeting in
-the transcript header, then the ticker's own majority. See
-`src/identity_free_volatility/strux.py`.
+STRUX has only the call date, so the before/after-market flag (relative to the
+call date) is recovered from DEC's own label window where the corpora overlap,
+then Yahoo's earnings timestamp, then the greeting in the transcript header,
+then the ticker's own majority. DEC's raw `beforeAfterMarket` column describes
+the vendor's report date, not the call date, so it is not used directly. See
+`src/identity_free_volatility/strux.py` and `docs/mason_plan.md` for the checks.
 
 ## Baselines
 
