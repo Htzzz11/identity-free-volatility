@@ -34,12 +34,7 @@ uv run python scripts/validate_labels.py  # agreement with DEC, timing-recovery 
 uv run pytest
 ```
 
-Team members do not need to download or rebuild anything: clone the private
-companion repository `SonghanWu/identity-free-volatility-data` (ask Songhan for
-access) and run `bash restore.sh /path/to/this/checkout`. It holds the
-transcripts, labels, price cache, LLM summaries and baseline predictions.
-
-Everything under `data/` and `results/` stays out of this repository. Transcript text must never
+Everything under `data/` and `results/` stays local. Transcript text must never
 be committed or re-hosted (STRUX is CC BY-NC-ND, DEC text is third-party).
 
 ## Labels
