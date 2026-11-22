@@ -26,6 +26,12 @@ def cache_dir(corpus: Corpus, encoder: str = ENCODER) -> Path:
     return PROCESSED / "chunks" / corpus.name / encoder.split("/")[-1]
 
 
+def chunk_ids(tok, text: str) -> list[list[int]]:
+    """[CLS] + 510 tokens + [SEP] windows over one transcript."""
+    toks = tok(text, add_special_tokens=False, verbose=False)["input_ids"]
+    return [[tok.cls_token_id, *toks[i:i + WINDOW], tok.sep_token_id] for i in range(0, max(len(toks), 1), WINDOW)]
+
+
 def encode_corpus(corpus: Corpus, encoder: str = ENCODER, batch: int = 32,
                   limit: int | None = None, log=print) -> None:
     from transformers import AutoModel, AutoTokenizer
@@ -43,11 +49,10 @@ def encode_corpus(corpus: Corpus, encoder: str = ENCODER, batch: int = 32,
     device = pick_device()
     tok = AutoTokenizer.from_pretrained(encoder)
     model = AutoModel.from_pretrained(encoder).eval().to(device)
-    cls, sep, pad = tok.cls_token_id, tok.sep_token_id, tok.pad_token_id
+    pad = tok.pad_token_id
     t0, n_chunks = time.time(), 0
     for k, (cid, text) in enumerate(todo):
-        toks = tok(text, add_special_tokens=False, verbose=False)["input_ids"]
-        chunks = [[cls, *toks[i:i + WINDOW], sep] for i in range(0, max(len(toks), 1), WINDOW)]
+        chunks = chunk_ids(tok, text)
         vecs = []
         for i in range(0, len(chunks), batch):
             part = chunks[i:i + batch]
