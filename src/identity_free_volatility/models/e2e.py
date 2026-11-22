@@ -19,6 +19,7 @@ training (1.4% of DEC calls). Validation and test always read the full call.
 """
 from __future__ import annotations
 
+import contextlib
 import time
 from pathlib import Path
 
@@ -58,6 +59,22 @@ def _load_encoder() -> nn.Module:
     return AutoModel.from_pretrained(chunk_cache.ENCODER).float()
 
 
+def _amp(device) -> contextlib.AbstractContextManager:
+    """bf16 autocast on CUDA (weights and optimizer stay float32); no change on MPS/CPU."""
+    if torch.device(device).type == "cuda":
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
+
+
+def _new_model(top: hier.HierModel, pad_id: int, device) -> "E2E":
+    model = E2E(_load_encoder(), top, pad_id).to(device)
+    if torch.device(device).type == "cuda":
+        # recompute encoder activations in backward: full backprop through up to
+        # MAX_TRAIN_CHUNKS x 512 tokens otherwise needs tens of GB
+        model.encoder.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    return model
+
+
 class E2E(nn.Module):
     def __init__(self, encoder: nn.Module, top: hier.HierModel, pad_id: int):
         super().__init__()
@@ -88,7 +105,9 @@ class E2E(nn.Module):
 @torch.no_grad()
 def predict(model: E2E, toks, idx, vectors: bool = False) -> torch.Tensor:
     model.eval()
-    return torch.stack([model(toks[i], vectors=vectors, batch=32) for i in idx])
+    device = next(model.parameters()).device
+    with _amp(device):
+        return torch.stack([model(toks[i], vectors=vectors, batch=32).float() for i in idx])
 
 
 def _quarter_dir(corpus: Corpus, seed: int) -> Path:
@@ -138,7 +157,7 @@ def run_quarter(corpus: Corpus, toks, frozen, test: str, seed: int, device, log=
     tok = AutoTokenizer.from_pretrained(chunk_cache.ENCODER)
     top = hier.HierModel(frozen[0].shape[1])
     top.load_state_dict(init["top"])
-    model = E2E(_load_encoder(), top, tok.pad_token_id).to(device)
+    model = _new_model(top, tok.pad_token_id, device)
     opt = torch.optim.AdamW([{"params": model.encoder.parameters(), "lr": LR_ENCODER},
                              {"params": model.top.parameters(), "lr": LR_TOP}], weight_decay=WEIGHT_DECAY)
     total = EPOCHS * int(np.ceil(len(tr_idx) / ACCUM))
@@ -172,7 +191,9 @@ def run_quarter(corpus: Corpus, toks, frozen, test: str, seed: int, device, log=
             if len(c) > MAX_TRAIN_CHUNKS:   # keep order, drop random chunks (deterministic in pos)
                 keep = np.sort(np.random.default_rng([seed, qcode, epoch, pos]).choice(len(c), MAX_TRAIN_CHUNKS, replace=False))
                 c = [c[k] for k in keep]
-            loss = nn.functional.mse_loss(model(c), z[i])
+            with _amp(device):
+                out = model(c)
+            loss = nn.functional.mse_loss(out.float(), z[i])
             (loss / ACCUM).backward()
             running += loss.item(); seen += len(c)
             if (pos + 1) % ACCUM == 0 or pos + 1 == len(perm):
@@ -196,7 +217,7 @@ def run_quarter(corpus: Corpus, toks, frozen, test: str, seed: int, device, log=
         model.load_state_dict(torch.load(best_file, map_location=device))
     else:   # no epoch beat the frozen model: fall back to pretrained encoder + step-1 top
         top.load_state_dict(init["top"])
-        model = E2E(_load_encoder(), top, tok.pad_token_id).to(device)
+        model = _new_model(top, tok.pad_token_id, device)
     pred = (predict(model, toks, te_idx) * sd + mu).cpu().numpy()
     vec = predict(model, toks, te_idx, vectors=True).cpu().numpy()
     mse = ((pred - corpus.y[te_idx]) ** 2).mean(axis=0)
