@@ -1,0 +1,191 @@
+\documentclass{article}
+
+\PassOptionsToPackage{numbers}{natbib}
+\usepackage[final]{neurips_2019}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{nicefrac}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+% Red placeholders: things only the team can fill in.
+\newcommand{\todo}[1]{\textcolor{red}{[#1]}}
+% Red text without brackets: additions from the 11/22 review, for the team to accept or cut.
+\newcommand{\new}[1]{\textcolor{red}{#1}}
+
+\title{
+Same Company, Different Quarter: Isolating Call-Specific Volatility Signal in Earnings Call Transcripts \\
+\vspace{1em}
+\small{\normalfont COMS 4705 Project Milestone} \\
+\small{\normalfont \textbf{Keywords:} \textit{financial NLP, volatility prediction, representation probing, domain-adversarial training, long documents}}
+}
+
+\author{
+Yanshengtian Dong \\
+Department of Computer Science \\
+Columbia University \\
+\texttt{yd2920@columbia.edu} \\
+\And
+Songhan Wu \\
+Department of Computer Science \\
+Columbia University \\
+\texttt{sw4252@columbia.edu} \\
+\And
+Tianzhi Hou \\
+Department of Computer Science \\
+Columbia University \\
+\texttt{th3258@columbia.edu}
+}
+
+\begin{document}
+
+\maketitle
+
+\section{Key Information}
+
+\begin{itemize}
+\item Mentor: \todo{assigned mentor name}.
+\item Sharing project: this project is not shared with another class or with outside research.
+\item Code: \url{https://github.com/Htzzz11/identity-free-volatility}. Transcript text and labels stay local because both corpora forbid redistribution.
+\end{itemize}
+
+\section{Approach}
+
+\paragraph{Question.}
+Yu et al.\ \cite{yu-etal-2025-company} show that transcript models for post-earnings volatility mostly learn which company is speaking. We ask how much signal a call carries after company identity is removed, and whether training that blocks the identity shortcut recovers signal that standard training hides.
+
+\paragraph{Response to proposal feedback.}
+The proposal feedback raised three points, and we agree with all of them.
+
+First, the disclosure preprint we cited is Choi et al.\ \cite{choi2025texttoalpha}. It finds that the change between a firm's consecutive filings predicts returns better than a single filing. The feedback noted that a model using two filings simply sees more history, so the gain may come from the extra information and not from differencing. We now cite the paper as motivation only and treat this confound as something our experiments must rule out.
+
+Second, H3 was stated too strongly and had no metric. A representation built from two consecutive calls may beat a single call for the same reason. We now compare differencing against a concatenation control that receives the same two calls without subtracting them. The revised H3 is that differencing beats concatenation at equal input. The metrics are $\rho_{\text{within}}$ and MSE on the residual target.
+
+Third, a post-hoc probe that fails to recover the ticker does not prove that identity is gone. Adversarial training may only hide identity from a weak probe while the stronger main model still uses it. Elazar and Goldberg \cite{elazar-goldberg-2018-adversarial} make the same point, and we no longer treat probe accuracy as the main evidence. Section~\ref{sec:plan} describes the probes of increasing capacity and the behavioral tests that replace it. The feedback also asked how the adversarial training works, and Section~\ref{sec:plan} now specifies it.
+
+\paragraph{\new{Model.}}
+\new{We trained the first version of our own model on DEC. Each transcript is cut into windows of 510 tokens, which gives 23.8 chunks per call on average. A frozen DeBERTa-v3-base encodes every chunk and we take the mean of its last hidden states. A two-layer transformer with four heads and width 256 reads the chunk vectors of one call. Their masked mean is the call vector, and a linear head predicts the four horizons. Training uses the raw target with no residual, no differencing and no adversary. We fit one model per test quarter with AdamW, early stopping on validation MSE and three seeds. The DeBERTa encoder is not updated in this version. End-to-end fine-tuning is the next step and is not finished.}
+
+\paragraph{Identity removal.}
+We test three routes. M1 predicts the residual $v-\mathrm{STPEV}_c$, so the company mean is no longer something the model can gain from. M2 represents a call by its difference from the previous call of the same ticker. M3 adds a ticker adversary through gradient reversal. \new{M1 and M2 already run on frozen embeddings with ridge regression, and Table~\ref{tab:m2} reports them. None of the three is implemented in the neural model yet.} Section~\ref{sec:plan} gives the design of each.
+
+\paragraph{Baselines.}
+We implemented PEV and STPEV, Random(Ticker) and Random(All) vectors with an MLP head, an MLP on the OpenAI embeddings that Yu et al.\ release, and TF-IDF with ridge regression. We also added an LLM-summary baseline. Claude Sonnet 5.5 and Claude Haiku 5.5 each summarized all 1,800 DEC calls into about 400 words. A local BGE-M3 encoder embedded the summaries and the same MLP head made the prediction. The API cost was 44 dollars. The MLP baselines reproduce the result files in the authors' repository with a correlation of at least 0.978 across all 76 quarter and horizon cells. Eight unit tests cover the label formula, the Target example, the STPEV column in DEC and the absence of look-ahead in the splits.
+
+\paragraph{Corrections to the proposal.}
+Our proposal copied its label formula from Yu et al.\ \cite{yu-etal-2025-company}, and that formula is wrong. The correct label for horizon $\tau$ is
+\[
+v_\tau = \log \sqrt{\frac{1}{\tau}\sum_{i=0}^{\tau-1}\left(r_{t+i}-\bar r\right)^2},
+\]
+where $r$ are simple daily returns of adjusted closes and $\bar r$ is their mean over the window. The proposal had no $1/\tau$ factor and summed $\tau+1$ terms. Yu et al.\ print a formula with the same two problems, but their own worked example only comes out under the corrected one. Target released its Q3 2017 results at 8:00 AM ET on 15 November 2017. The corrected formula gives $v_3=-2.726$ and the misaligned window of 16 to 20 November gives $-3.703$, both matching the paper. Log returns give $-2.698$ and dropping $1/\tau$ gives $-2.177$. The corrected formula also reproduces all four label columns of DEC to within $10^{-9}$.
+
+The proposal defined $t$ as the first session after the release. More precisely, $t$ is the first session whose close reflects the release. That is the release day itself for a release before the open and the next session for a release after the close. The Target example above is a release before the open. The STRUX release we downloaded has 11,411 calls from 858 tickers, not the 11,950 calls from 869 tickers we quoted from the paper.
+
+\section{Experiments}
+
+\paragraph{Data and labels.}
+We cached adjusted closes from June 2016 to December 2024 for 747 tickers. Another 111 tickers are no longer served by Yahoo, mostly after delistings or acquisitions. Three renamed tickers were mapped by hand. STRUX gives only the call date, so we have to recover whether each release came before the open or after the close. Where the corpora overlap, we read it from the window of the DEC label. Elsewhere we fall back in order to the Yahoo earnings timestamp, the greeting at the start of the transcript and the majority flag of the ticker. Checked against DEC on 1,357 overlapping calls, the Yahoo timestamp is right 99.7\% of the time and the greeting 97.0\%. The full fallback chain is right 98.1\% of the time and covers 95\% of calls. Our final STRUX labels agree with DEC to within 0.05 on 99.8\% of overlapping calls at $\tau=3$.
+
+Validation found one bug in our own pipeline. DEC's raw market-timing flag refers to the vendor's report date, not the call date. Some companies release after the close and hold the call the next morning, so applying the flag to the call date moved their windows by one day. We now read the flag from where DEC's own return window starts. This changed 63 of 4,127 labels.
+
+The dense subset keeps tickers with at least 20 calls. It has 4,124 labeled calls from 172 tickers after we dropped three calls that STRUX lists twice under different dates. STRUX splits follow the DEC protocol. Each test set is one calendar quarter, and all earlier calls are split 2:1 into train and validation. Automated checks confirm that no train or validation call is dated on or after the first test call.
+
+\paragraph{Evaluation.}
+The primary metric is MSE at each horizon and its average. As in Yu et al., it is computed per test quarter and then averaged over quarters. MSE alone rewards a model for knowing the company, so we add three identity diagnostics. $\rho_{\text{within}}$ is the Spearman correlation between prediction and label inside each ticker, which a company lookup table cannot improve. \new{Ticker share is the fraction of a model's prediction variance explained by the ticker. The ticker probe measures how well the ticker can be read from a frozen representation.}
+
+\paragraph{Results.}
+Table~\ref{tab:baselines} reports MSE averaged over the four horizons. DEC uses the 2021 to 2023 test quarters as in Table 4 of Yu et al. STRUX uses the dense subset from 2021 to 2024. Models with a trained head use three seeds.
+
+\begin{table}[h]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lccccc}
+\toprule
+Model & DEC MSE & Yu et al. & DEC $\rho_{\text{within}}$ & Ticker share & STRUX MSE \\
+\midrule
+TF-IDF + ridge & \textbf{0.243} & n/a & 0.022 & 0.78 & \textbf{0.276} \\
+STPEV & 0.252 & 0.252 & $-0.246$ & 0.97 & 0.283 \\
+Random(Ticker) + MLP & 0.267 $\pm$ 0.001 & 0.265 & $-0.116$ & 0.79 & 0.296 $\pm$ 0.003 \\
+OpenAI embedding + MLP & 0.280 $\pm$ 0.002 & 0.263 & $-0.016$ & 0.61 & n/a \\
+Sonnet 5.5 summary + MLP & 0.281 $\pm$ 0.003 & 0.249 to 0.262 & $-0.044$ & 0.58 & not run \\
+Haiku 5.5 summary + MLP & 0.287 $\pm$ 0.002 & 0.249 to 0.262 & $-0.056$ & 0.57 & not run \\
+\new{Ours, frozen DeBERTa} & \new{0.293 $\pm$ 0.007} & \new{n/a} & \new{$-0.026$} & \new{0.38} & \new{not run} \\
+PEV & 0.310 & 0.307 & $-0.109$ & 0.00 & 0.416 \\
+Random(All) + MLP & 0.331 $\pm$ 0.003 & 0.323 & $-0.003$ & 0.08 & 0.438 $\pm$ 0.003 \\
+\bottomrule
+\end{tabular}
+\caption{Average MSE over $\tau\in\{3,7,15,30\}$. $\rho_{\text{within}}$ is the Spearman correlation between prediction and label inside each ticker, averaged over tickers. Ticker share is the fraction of prediction variance explained by the ticker, and the same fraction for the true labels is 0.36. The Yu et al.\ summary row used GPT-4o or Gemini summaries with OpenAI embeddings, so it is context only.}
+\label{tab:baselines}
+\end{table}
+
+STPEV matches the published number exactly, and every other reimplemented baseline is within 0.017 of its published value. The OpenAI row is the largest gap. Our 0.280 is close to the 0.278 in the authors' own result files, so the gap sits between their paper and their released code.
+
+TF-IDF with ridge is the only model that beats STPEV, by 0.009 on DEC and 0.007 on STRUX. \new{The gap is small but it is not noise. A bootstrap that resamples tickers gives a 95\% interval of 0.002 to 0.017 on DEC and 0.001 to 0.014 on STRUX. TF-IDF wins on 58\% of DEC tickers and 56\% of STRUX tickers.} We do not read this as call-specific signal yet. The ridge model sees company names and is trained on the raw target. Its within-ticker correlation is 0.022 on DEC, so it barely ranks a company's calls against each other. A likely explanation is that it learns a shrunk company mean that is a better identity baseline than the raw mean in STPEV. The LLM summaries do no better than the raw OpenAI embeddings and both trail Random(Ticker). This matches the finding of Yu et al.\ that semantic content adds little once identity is known. \new{Its ticker share is 0.78, far above the 0.36 of the true labels, which points the same way.}
+
+\paragraph{\new{Our model.}}
+\new{The model reaches 0.293 $\pm$ 0.007 on DEC. That is better than PEV at 0.310 and worse than STPEV at 0.252 and Random(Ticker) at 0.267. Its $\rho_{\text{within}}$ is $-0.026$. So standard training on text reproduces the result of Yu et al.\ with our own architecture: it does not beat the company mean and it does not rank a company's own calls. This row is the reference that M1 to M3 will be compared against.} \new{Its ticker share is 0.38, the closest of any model to the true labels.}
+
+\paragraph{\new{Ticker probe.}}
+\new{The probe trains on the first 15 calls of each ticker and tests on the last 5, so it asks whether a future call of the same company can be recognized. Features are standardized and reduced to 256 principal components fit on the training calls. We use a logistic regression and a one-layer MLP with 512 hidden units. Chance is 1.1\%. Both probes reach 100\% on the OpenAI embeddings. On the Sonnet summary embeddings the linear probe reaches 100\% and the MLP 99.8\%. A control with one random vector per call stays at 0.9\%. On mean-pooled DeBERTa chunk vectors both probes reach 98.7\%. On the call vectors of our trained model the linear probe reaches 77.3\% and the MLP 83.3\%, averaged over three seeds. The ticker explains 61\% of the variance of the OpenAI embeddings and 57\% for both the summary embeddings and our call vectors. Company identity is therefore readable from every representation we have, before any removal.}
+
+\paragraph{\new{Residual target and differencing on frozen embeddings.}}
+\new{Table~\ref{tab:m2} is a first test of M1 and M2 that needs no encoder training. No input beats STPEV at 0.252. The difference of consecutive calls is the worst input on both embeddings, and it is worse than the concatenation of the same two calls. This first test does not support H3. Subtracting the mean of a ticker's earlier calls is the only input that moves $\rho_{\text{within}}$ from clearly negative values to zero. These are linear models on embeddings that were never trained for this task. They bound what frozen features offer and say little about a trained encoder.}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+ & \multicolumn{2}{c}{OpenAI embedding} & \multicolumn{2}{c}{Sonnet summary embedding} \\
+Input to ridge & MSE & $\rho_{\text{within}}$ & MSE & $\rho_{\text{within}}$ \\
+\midrule
+A. current call $z_t$ & 0.257 & $-0.132$ & 0.257 & $-0.080$ \\
+B. previous call $z_{t-1}$ & 0.255 & $-0.204$ & 0.256 & $-0.208$ \\
+C. concatenation $[z_t; z_{t-1}]$ & 0.255 & $-0.142$ & 0.257 & $-0.117$ \\
+D. difference $z_t - z_{t-1}$ & 0.263 & $-0.114$ & 0.260 & $-0.098$ \\
+F. $z_t$ minus mean of earlier calls & 0.259 & 0.005 & 0.255 & 0.003 \\
+G. $z_t$ minus a call of another ticker & 0.256 & $-0.144$ & 0.256 & $-0.136$ \\
+\midrule
+STPEV on the same calls & 0.252 & $-0.246$ & 0.252 & $-0.246$ \\
+\bottomrule
+\end{tabular}
+\caption{\new{Residual target on frozen embeddings, DEC 2021 to 2023. Ridge regression predicts $v-\mathrm{STPEV}_c$ and the company mean is added back.}}
+\label{tab:m2}
+\end{table}
+
+\paragraph{\new{Known limitations.}}
+\new{Four caveats apply to these numbers. First, the STRUX subset has survivorship bias. The 111 tickers without prices were mostly delisted or acquired, and seven of them had at least 20 calls. Second, label windows can cross the split boundary. A 30-day window is about six weeks long, so a training call held late in a quarter has a label that extends into the test quarter. In DEC 2.8\% of calls fall in the last half month of a quarter, and in STRUX 3.9\% do. The protocol is the one Yu et al.\ use and it affects every model equally. Third, the LLM summaries may carry hindsight. Sonnet 5.5 and Haiku 5.5 were trained after these calls took place, so a summary could reflect what the model knows about later events. Both summary baselines trail STPEV, so this does not change any conclusion. Fourth, we estimate that 1\% to 2\% of STRUX labels outside the DEC tickers start one day off, because the release time there comes only from the Yahoo timestamp or the greeting.}
+
+\section{Future Work}
+\label{sec:plan}
+
+\paragraph{Next experiments.}
+The TF-IDF result gives a cheap first test of identity removal. We will rerun it with company, product and executive names masked and with the residual target $v-\mathrm{STPEV}_c$. If its lead over STPEV disappears, the lead was identity. \new{We will fine-tune the DeBERTa encoder end to end, since the current model keeps it frozen, and run the model on STRUX.} M1 then trains the hierarchical encoder on the residual target.
+
+\paragraph{Differencing and its control.}
+M2 encodes the current call and the previous call of the same ticker with the same encoder and feeds the difference of the two call vectors to the head. The control M2c feeds their concatenation to a head of the same size. Both models see exactly the same text, so any gap between them comes from the differencing and not from extra history. Single-call M1 is the third point of comparison. H3 holds only if M2 beats M2c on $\rho_{\text{within}}$ and on residual MSE across three seeds. \new{The frozen-embedding result in Table~\ref{tab:m2} makes this the hypothesis most at risk.}
+
+\paragraph{Adversarial training.}
+M3 attaches a ticker classifier to the call vector through a gradient reversal layer \cite{ganin2016dann}. The classifier is a two-layer MLP trained with cross-entropy over tickers. In the forward pass the layer is the identity. In the backward pass it multiplies the classifier's gradient by $-\lambda$ before it reaches the encoder. The encoder therefore learns to make the ticker hard to predict while the head still fits volatility. We ramp $\lambda$ from 0 to its final value over training and choose the final value on validation residual MSE.
+
+\paragraph{Testing whether identity is gone.}
+We train fresh ticker probes of increasing capacity on the frozen call vectors. They are the linear probe and the one-layer MLP used above, plus an MLP as large as the prediction head. We report accuracy against capacity, since a drop that only appears for the linear probe means identity is hidden but not removed. Two behavioral tests do not depend on any probe. The first is the ticker share of the predictions, which should fall toward the 0.36 of the true labels. The second is $\rho_{\text{within}}$, which a company lookup table cannot improve. We report both next to MSE for every model.
+
+\paragraph{Roles.}
+Songhan Wu finished data, labels, all baselines and the frozen-embedding analyses in this report. Yanshengtian Dong built the hierarchical model and owns the training pipeline, which covers end-to-end fine-tuning, M1 and M2. Tianzhi Hou owns M3, the post-hoc probe, nullspace projection and the error analysis. \todo{Adjust if the split has changed.}
+
+\paragraph{Timeline.}
+\todo{Confirm dates.} 30 November: end-to-end fine-tuning of the encoder on DEC, plus the masked TF-IDF rerun. 7 December: M1 to M3 on DEC and STRUX with three seeds. 14 December: analysis, plots and a full report draft. 17 December: final report.
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\end{document}
