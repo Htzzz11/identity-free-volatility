@@ -50,6 +50,14 @@ def token_chunks(corpus: Corpus, encoder: str = chunk_cache.ENCODER) -> list[lis
     return out
 
 
+def _load_encoder() -> nn.Module:
+    """The checkpoint is stored in half precision and transformers keeps that
+    dtype by default. Training needs float32 (the top is float32, and fp16
+    without loss scaling is unstable), so cast explicitly."""
+    from transformers import AutoModel
+    return AutoModel.from_pretrained(chunk_cache.ENCODER).float()
+
+
 class E2E(nn.Module):
     def __init__(self, encoder: nn.Module, top: hier.HierModel, pad_id: int):
         super().__init__()
@@ -94,7 +102,7 @@ def finished(corpus: Corpus, seed: int) -> list[str]:
 def run_quarter(corpus: Corpus, toks, frozen, test: str, seed: int, device, log=print,
                 max_train: int | None = None, max_eval: int | None = None) -> None:
     """max_train / max_eval shrink the quarter for smoke tests only."""
-    from transformers import AutoModel, AutoTokenizer
+    from transformers import AutoTokenizer
 
     out_dir = _quarter_dir(corpus, seed)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -130,7 +138,7 @@ def run_quarter(corpus: Corpus, toks, frozen, test: str, seed: int, device, log=
     tok = AutoTokenizer.from_pretrained(chunk_cache.ENCODER)
     top = hier.HierModel(frozen[0].shape[1])
     top.load_state_dict(init["top"])
-    model = E2E(AutoModel.from_pretrained(chunk_cache.ENCODER), top, tok.pad_token_id).to(device)
+    model = E2E(_load_encoder(), top, tok.pad_token_id).to(device)
     opt = torch.optim.AdamW([{"params": model.encoder.parameters(), "lr": LR_ENCODER},
                              {"params": model.top.parameters(), "lr": LR_TOP}], weight_decay=WEIGHT_DECAY)
     total = EPOCHS * int(np.ceil(len(tr_idx) / ACCUM))
@@ -188,7 +196,7 @@ def run_quarter(corpus: Corpus, toks, frozen, test: str, seed: int, device, log=
         model.load_state_dict(torch.load(best_file, map_location=device))
     else:   # no epoch beat the frozen model: fall back to pretrained encoder + step-1 top
         top.load_state_dict(init["top"])
-        model = E2E(AutoModel.from_pretrained(chunk_cache.ENCODER), top, tok.pad_token_id).to(device)
+        model = E2E(_load_encoder(), top, tok.pad_token_id).to(device)
     pred = (predict(model, toks, te_idx) * sd + mu).cpu().numpy()
     vec = predict(model, toks, te_idx, vectors=True).cpu().numpy()
     mse = ((pred - corpus.y[te_idx]) ** 2).mean(axis=0)
@@ -210,10 +218,11 @@ def report(corpus: Corpus, seed: int) -> pd.DataFrame | None:
         return None
     ours = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
     tests = sorted(ours["test"].unique())
+    calls = set(ours["call_id"])
     truth = corpus.frame.set_index("call_id")[LABELS]
 
     def score(p):
-        p = p[p["test"].isin(tests)].set_index("call_id")
+        p = p[p["call_id"].isin(calls)].set_index("call_id")   # exactly the calls this run predicted
         se = (p[LABELS] - truth.loc[p.index]) ** 2
         by_q = se.groupby(p["test"]).mean()
         return by_q.mean().mean(), len(p)

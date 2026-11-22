@@ -2,12 +2,11 @@
 
 ## 状态（2026-11-22）
 
-- 代码写完了，**但训练循环还没有在任何机器上跑通过**。
-- 在 Mac（M4 Max，MPS）上，第一步训练就在 Apple 的 GPU 后端里崩溃：
-  `MPSNDArrayMatrixMultiplication: Destination NDArray and Accumulator NDArray cannot have different datatype`。
-  单独对 DeBERTa 做 forward 加 backward 是正常的，所以问题出在整条链路的某个组合上，还没定位。
-- **没有在 CUDA 上测过。** 崩溃点在 MPS 后端内部，CUDA 上很可能没有这个问题，但这只是推测。
-- 已经验证过的部分：分词和切块与冻结缓存完全一致（块数相同，同一场电话会的块向量和缓存逐位相同）；第一步的冻结训练能跑。
+- **在 Mac（M4 Max，MPS）上用小样本跑通了**：16 场训练、6 场验证、6 场测试，3 个 epoch。中途杀掉进程再启动，能从断点继续并跑完，季度完成后断点被清掉，`--report` 正常出表。
+- **全量还没有跑过，CUDA 上也没有测过。**
+- 修掉的一个坑：DeBERTa-v3-base 的权重是半精度存的，transformers 默认保持这个精度。上层是 float32，两者接在一起时 MPS 后端直接崩溃（`MPSNDArrayMatrixMultiplication ... different datatype`）。现在训练时把 encoder 显式转成 float32（`e2e._load_encoder`）。
+- 验证过：分词和切块与冻结缓存一致（块数相同，同一场电话会的块向量和缓存逐位相同）。
+- 小样本的数字没有意义，不要引用。
 
 ## 它做什么
 
